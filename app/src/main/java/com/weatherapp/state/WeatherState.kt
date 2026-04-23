@@ -10,6 +10,16 @@ sealed class WeatherState {
     data object Night : WeatherState()
 }
 
+data class HourlyForecast(
+    val time: String,
+    val temperature: String,
+    val description: String,
+    val mainCondition: String,
+    val humidity: String,
+    val wind: String,
+    val weatherState: WeatherState
+)
+
 data class WeatherUiState(
     val weatherState: WeatherState = WeatherState.Sunny,
     val temperature: String = "--°C",
@@ -19,5 +29,7 @@ data class WeatherUiState(
     val description: String = "Loading...",
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
-    val searchSuggestions: List<com.weatherapp.model.LocationResult> = emptyList()
+    val searchSuggestions: List<com.weatherapp.model.LocationResult> = emptyList(),
+    val hourlyForecast: List<HourlyForecast> = emptyList(),
+    val selectedForecast: HourlyForecast? = null
 )

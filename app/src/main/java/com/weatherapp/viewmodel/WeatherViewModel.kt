@@ -6,6 +6,7 @@ import com.weatherapp.model.WeatherResponse
 import com.weatherapp.repository.WeatherRepository
 import com.weatherapp.state.WeatherState
 import com.weatherapp.state.WeatherUiState
+import com.weatherapp.state.HourlyForecast
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +18,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Calendar
 
 class WeatherViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(WeatherUiState())
@@ -51,9 +55,14 @@ class WeatherViewModel : ViewModel() {
         _uiState.update { it.copy(searchSuggestions = emptyList()) }
     }
 
+    fun selectForecastItem(item: HourlyForecast?) {
+        _uiState.update { it.copy(selectedForecast = item) }
+    }
+
     fun fetchWeather(city: String) {
-        _uiState.update { it.copy(isLoading = true, errorMessage = null, cityName = city) }
+        _uiState.update { it.copy(isLoading = true, errorMessage = null, cityName = city, selectedForecast = null) }
         
+        // Fetch Current Weather
         repository.getCurrentWeather(city).enqueue(object : Callback<WeatherResponse> {
             override fun onResponse(call: Call<WeatherResponse>, response: Response<WeatherResponse>) {
                 if (response.isSuccessful && response.body() != null) {
@@ -68,7 +77,6 @@ class WeatherViewModel : ViewModel() {
                     val mainCondition = weatherResponse.weather?.main ?: "Clear"
                     
                     val sys = weatherResponse.sys
-                    // Determine if current time (dt) is before sunrise or after sunset
                     val isNight = weatherResponse.dt < sys?.sunrise ?: 0 || weatherResponse.dt > sys?.sunset ?: Long.MAX_VALUE
                     
                     val parsedState = mapConditionToState(mainCondition, isNight)
@@ -106,6 +114,60 @@ class WeatherViewModel : ViewModel() {
                 }
             }
         })
+
+        // Fetch Forecast
+        repository.getForecast(city).enqueue(object : Callback<com.weatherapp.model.ForecastResponse> {
+            override fun onResponse(call: Call<com.weatherapp.model.ForecastResponse>, response: Response<com.weatherapp.model.ForecastResponse>) {
+                if (response.isSuccessful && response.body() != null) {
+                    val forecastList = response.body()!!.list
+                    val hourlyForecasts = forecastList.take(8).map { item ->
+                        val time = formatTime(item.dtTxt)
+                        val temp = Math.round(item.main.temperature).toString() + "°C"
+                        val humidity = item.main.humidity.toString() + "%"
+                        val wind = Math.round(item.wind.speed * 3.6).toString() + " km/h"
+                        val mainCondition = item.weather?.main ?: "Clear"
+                        val description = item.weather?.description?.replaceFirstChar {
+                            if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
+                        } ?: "Unknown"
+                        
+                        // Simple night check for forecast: if hour is late or very early
+                        val hour = try {
+                            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                            val date = sdf.parse(item.dtTxt)
+                            val cal = Calendar.getInstance()
+                            if (date != null) cal.time = date
+                            cal.get(Calendar.HOUR_OF_DAY)
+                        } catch (e: Exception) { 12 }
+                        val isNight = hour < 6 || hour > 19
+
+                        com.weatherapp.state.HourlyForecast(
+                            time = time,
+                            temperature = temp,
+                            description = description,
+                            mainCondition = mainCondition,
+                            humidity = humidity,
+                            wind = wind,
+                            weatherState = mapConditionToState(mainCondition, isNight)
+                        )
+                    }
+                    _uiState.update { it.copy(hourlyForecast = hourlyForecasts) }
+                }
+            }
+            override fun onFailure(call: Call<com.weatherapp.model.ForecastResponse>, t: Throwable) {
+                // Silently fail forecast for now
+            }
+        })
+    }
+
+    private fun formatTime(dtTxt: String): String {
+        return try {
+            val inputFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            val outputFormat = SimpleDateFormat("h a", Locale.getDefault())
+            val date = inputFormat.parse(dtTxt)
+            if (date != null) outputFormat.format(date) else dtTxt
+        } catch (e: Exception) {
+            dtTxt
+        }
     }
 
     private fun mapConditionToState(condition: String, isNight: Boolean): WeatherState {

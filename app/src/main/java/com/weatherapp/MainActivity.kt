@@ -199,7 +199,8 @@ fun WeatherApp() {
             
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                uiState = uiState
+                uiState = uiState,
+                onForecastItemClick = { viewModel.selectForecastItem(it) }
             )
             
             Spacer(modifier = Modifier.height(32.dp))
